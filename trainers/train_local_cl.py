@@ -12,6 +12,27 @@ from models.global_local_cl import LocalCL
 from trainers.train_global_cl import augment_and_concat, save
 from trainers.utils import (TensorboardLogger, compare_configs, seed_everything, crop_batch)
 
+
+def toy_example():
+    # if uncertain about the matrix movements when calculating the loss, try this toy example
+
+    # two images of two pixels with one channel
+    img1 = torch.tensor([1,2]).reshape((1,1,2,1))
+    img2 = torch.tensor([3,4]).reshape((1,1,2,1))
+    x = torch.cat([img1, img2], dim=0)
+    print(x.shape, x)
+    # augment the images - one with the identity matrix, one with a small offset
+    x = torch.cat([x, x+0.01], dim=0)
+    print(x.shape, x)
+    # extract two regions per image - each region is a 1x1 tensor
+    n_regions = 2
+    regions = torch.stack([x[:,:,0], x[:,:,1]], dim=1)
+    print(regions.shape, regions)
+    # move the dimensions around so as to match the masks in the 'calculate_loss_elements' function
+    regions = rearrange(regions, '(aug bs) r ... -> (aug r bs) (...)', aug=2, r = n_regions) 
+    print(regions.shape, regions)
+
+
 def calculate_loss_elements(logits, batch_size, n_regions, diag_offset):
     pos_mask = torch.zeros((batch_size * n_regions*2, batch_size * n_regions*2), device=logits.device) + \
                 torch.diag(torch.ones(batch_size * n_regions * 2 - abs(-n_regions * batch_size + diag_offset), device=logits.device), diagonal=-n_regions * batch_size + diag_offset) +\
@@ -30,7 +51,7 @@ def calculate_loss_elements(logits, batch_size, n_regions, diag_offset):
     #neg_mask -= torch.diag(torch.ones(batch_size * n_regions * 2 - abs(diag_offset), device=logits.device), diag_offset)
 
     pos_logits = (logits*pos_mask).sum(1)
-    neg_logits = torch.exp(logits*neg_mask).mean(1)
+    neg_logits = torch.log(torch.exp(logits*neg_mask).sum(1))
     return pos_logits[pos_mask.sum(1).bool()], neg_logits[pos_mask.sum(1).bool()]
 
 
@@ -42,10 +63,9 @@ def  calculate_loss(features, batch_size, tau):
     y_center_samples = torch.randperm(features.shape[3]-2).to(features.device)[:n_regions]+1
     # one sample
     regions = torch.stack([features[:,:,x_center_samples[i]-1:x_center_samples[i]+2, y_center_samples[i]-1:y_center_samples[i]+2] for i in range(n_regions)], dim=1) # (n_views x b) x n_regions x emb_dim x 3 x 3
-    regions = rearrange(regions, 'bn r c h w -> bn r (c h w)') # (n_views x b) x n_regions x (emb_dim x 3 x 3)
-    norm_regions = regions / regions.norm(dim=2, keepdim=True)
-
-    contrast_feature = torch.cat(torch.unbind(norm_regions, dim=1), dim=0) # b_1.reg1, b_1.reg2, ..., b_2.reg1, b_2.reg2, ...
+    unnorm_contrast_feature = rearrange(regions, '(aug batch_size) n_regions c h w -> (aug n_regions batch_size) (c h w)', aug=2)
+    contrast_feature = unnorm_contrast_feature / unnorm_contrast_feature.norm(dim=1, keepdim=True)
+    
     # compute logits - note: no numerical stability tricks here
     logits = torch.div(
             torch.matmul(contrast_feature, contrast_feature.T), tau
