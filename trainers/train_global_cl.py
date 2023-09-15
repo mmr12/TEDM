@@ -37,9 +37,9 @@ def calculate_loss(features, batch_size, tau):
     norm_features = features / features.norm(dim=1, keepdim=True)
     similarity_matrix = torch.exp(norm_features @ norm_features.T / tau) # 2b x 2b [[b_1xb_1, b_1xb_2], [b_2xb_1, b_2xb_2]]
     positive_term_1 = torch.diagonal(similarity_matrix[:batch_size, batch_size:])
-    negative_term_1 = similarity_matrix[:batch_size].sum(-1) - torch.diagonal(similarity_matrix[:batch_size, :batch_size]) - torch.diagonal(similarity_matrix[:batch_size, batch_size:]) # (b x 2b).sum(1) - (b_1 x b_1).diag() - (b_1 x b_2).diag() = b
+    negative_term_1 = similarity_matrix[:batch_size].sum(-1) - torch.diagonal(similarity_matrix[:batch_size, :batch_size]) # (b x 2b).sum(1) - (b_1 x b_1).diag() = b
     positive_term_2 = torch.diagonal(similarity_matrix[batch_size:, :batch_size])
-    negative_term_2 = similarity_matrix[batch_size:].sum(-1) - torch.diagonal(similarity_matrix[batch_size:, batch_size:]) - torch.diagonal(similarity_matrix[batch_size:, :batch_size]) # (b x 2b).sum(1) - (b_2 x b_2).diag() - (b_2 x b_1).diag() = b
+    negative_term_2 = similarity_matrix[batch_size:].sum(-1) - torch.diagonal(similarity_matrix[batch_size:, batch_size:]) # (b x 2b).sum(1) - (b_2 x b_2).diag()= b
     loss = (-torch.log(positive_term_1 / negative_term_1).mean() - torch.log(positive_term_2 / negative_term_2).mean())/2
     return loss
 
